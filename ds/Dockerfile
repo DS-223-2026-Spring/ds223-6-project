@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────
-#  DS Service – Python 3.13 (Data Science / Pipeline)
+#  DS Service – Python 3.11 (Data Science / Pipeline)
 #  Runs the MMM pipeline: EDA, adstock, saturation, model
 # ─────────────────────────────────────────────────────────────
 

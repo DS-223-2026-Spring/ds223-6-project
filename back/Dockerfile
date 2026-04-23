@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────
-#  Backend Service – FastAPI (Python 3.13)
+#  Backend Service – FastAPI (Python 3.11)
 #  REST API that serves model results and runs the optimizer.
 #  Swagger UI available at http://localhost:8000/docs
 # ─────────────────────────────────────────────────────────────

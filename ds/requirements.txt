@@ -1,0 +1,24 @@
+# Data processing
+pandas==2.2.2
+numpy==1.26.4
+scipy==1.13.0
+
+# Database connection
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.30
+
+# Modeling
+scikit-learn==1.4.2
+statsmodels==0.14.2
+pymc==5.15.0          # Bayesian upgrade (Sprint 4 stretch goal)
+
+# Visualisation (for EDA notebook)
+matplotlib==3.8.4
+seaborn==0.13.2
+
+# Notebook support
+jupyter==1.0.0
+ipykernel==6.29.4
+
+# Utilities
+python-dotenv==1.0.1

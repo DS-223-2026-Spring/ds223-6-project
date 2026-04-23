@@ -1,10 +1,10 @@
 # ─────────────────────────────────────────────────────────────
-#  Orchestration Service – Prefect (Python 3.11)
+#  Orchestration Service – Prefect (Python 3.13)
 #  Manages and schedules pipeline runs.
 #  Prefect UI at http://localhost:4200
 # ─────────────────────────────────────────────────────────────
 
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 WORKDIR /app
 

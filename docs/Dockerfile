@@ -6,7 +6,7 @@
 
 FROM python:3.11-slim
 
-WORKDIR /
+WORKDIR /docs
 
 RUN pip install --no-cache-dir \
     mkdocs==1.6.0 \

@@ -5,6 +5,7 @@
 --          model_runs, channel_coefficients, budget_scenarios
 -- ─────────────────────────────────────────────────────────────
 
+
 -- Raw weekly ad spend per channel
 CREATE TABLE IF NOT EXISTS raw_spend_data (
     id            SERIAL PRIMARY KEY,
@@ -53,7 +54,7 @@ CREATE TABLE IF NOT EXISTS channel_coefficients (
     id                SERIAL PRIMARY KEY,
     model_run_id      INTEGER REFERENCES model_runs(id) ON DELETE CASCADE,
     channel           VARCHAR(50)  NOT NULL,
-    coefficient       NUMERIC(10,6),
+    coefficient       NUMERIC(20,6),
     roi_estimate      NUMERIC(8,4),   -- revenue per $1 spent
     contribution_pct  NUMERIC(5,2)    -- % of total attributed revenue
 );

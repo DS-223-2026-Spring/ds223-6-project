@@ -4,9 +4,9 @@
 #  Any .md file saved in ./docs/ reloads instantly.
 # ─────────────────────────────────────────────────────────────
 
-FROM python:3.13-slim
+FROM python:3.11-slim
 
-WORKDIR /docs
+WORKDIR /
 
 RUN pip install --no-cache-dir \
     mkdocs==1.6.0 \

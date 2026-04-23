@@ -127,18 +127,18 @@ services:
       - mmm_network
 
   # ── 6. Documentation (MkDocs) ───────────────────────────
-  docs:
-    build:
-      context: ./docs
-      dockerfile: Dockerfile
-    container_name: mmm_docs
-    restart: unless-stopped
-    ports:
-      - "8080:8080"                 # MkDocs live preview at http://localhost:8080
-    volumes:
-      - ./docs:/docs                # live-reload: edits appear instantly
-    networks:
-      - mmm_network
+  # docs:
+  #   build:
+  #    context: ./docs
+  #    dockerfile: Dockerfile
+  #  container_name: mmm_docs
+  #  restart: unless-stopped
+  #  ports:
+  #    - "8080:8080"                 # MkDocs live preview at http://localhost:8080
+  #  volumes:
+  #    - ./docs:/docs                # live-reload: edits appear instantly
+  #  networks:
+  #    - mmm_network
 
 # ── Volumes ──────────────────────────────────────────────
 volumes:

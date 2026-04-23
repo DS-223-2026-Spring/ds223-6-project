@@ -4,7 +4,7 @@
 #  Swagger UI available at http://localhost:8000/docs
 # ─────────────────────────────────────────────────────────────
 
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 WORKDIR /app
 

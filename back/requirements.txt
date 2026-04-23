@@ -1,0 +1,17 @@
+# API framework
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+
+# Database
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.30
+
+# Validation & serialization — pinned to match orch service
+pydantic==2.10.6
+
+# Optimization (for budget optimizer endpoint)
+scipy==1.13.0
+numpy==1.26.4
+
+# Utilities
+python-dotenv==1.0.1

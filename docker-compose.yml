@@ -1,0 +1,150 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────
+#  MMM Platform – Docker Compose
+#  Services: db, ds, back, front, orch, docs
+#  Run:  docker-compose up --build
+#  Stop: docker-compose down
+# ─────────────────────────────────────────────────────────────
+
+services:
+
+  # ── 1. PostgreSQL Database ──────────────────────────────
+  db:
+    build:
+      context: ./db
+      dockerfile: Dockerfile
+    container_name: mmm_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-mmm_db}
+      POSTGRES_USER:     ${POSTGRES_USER:-mmm_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mmm_pass}
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d   # SQL init scripts run on first start
+      - ./data:/app/data                         # CSV files accessible to load_data.py
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mmm_user} -d ${POSTGRES_DB:-mmm_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mmm_network
+
+  # ── 2. Data Science / Pipeline ─────────────────────────
+  ds:
+    build:
+      context: ./ds
+      dockerfile: Dockerfile
+    container_name: mmm_ds
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST:     db
+      POSTGRES_PORT:     5432
+      POSTGRES_DB:       ${POSTGRES_DB:-mmm_db}
+      POSTGRES_USER:     ${POSTGRES_USER:-mmm_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mmm_pass}
+      PYTHONUNBUFFERED:  1
+    volumes:
+      - ./ds:/app                   # live-reload: edit code without rebuilding
+      - ./data:/app/data            # shared data folder for CSV files
+    depends_on:
+      db:
+        condition: service_healthy  # waits for DB to be ready
+    networks:
+      - mmm_network
+
+  # ── 3. Backend API ──────────────────────────────────────
+  back:
+    build:
+      context: ./back
+      dockerfile: Dockerfile
+    container_name: mmm_back
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST:     db
+      POSTGRES_PORT:     5432
+      POSTGRES_DB:       ${POSTGRES_DB:-mmm_db}
+      POSTGRES_USER:     ${POSTGRES_USER:-mmm_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mmm_pass}
+      PYTHONUNBUFFERED:  1
+    ports:
+      - "8000:8000"                 # FastAPI + Swagger UI at http://localhost:8000/docs
+    volumes:
+      - ./back:/app
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - mmm_network
+
+  # ── 4. Frontend Dashboard ───────────────────────────────
+  front:
+    build:
+      context: ./front
+      dockerfile: Dockerfile
+    container_name: mmm_front
+    restart: unless-stopped
+    environment:
+      REACT_APP_API_URL: http://localhost:8000   # backend URL seen by browser
+    ports:
+      - "3000:3000"                 # React dev server at http://localhost:3000
+    volumes:
+      - ./front:/app
+      - /app/node_modules           # keep node_modules inside container
+    depends_on:
+      - back
+    networks:
+      - mmm_network
+
+  # ── 5. Orchestration (Prefect) ──────────────────────────
+  orch:
+    build:
+      context: ./orch
+      dockerfile: Dockerfile
+    container_name: mmm_orch
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST:     db
+      POSTGRES_PORT:     5432
+      POSTGRES_DB:       ${POSTGRES_DB:-mmm_db}
+      POSTGRES_USER:     ${POSTGRES_USER:-mmm_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mmm_pass}
+      PYTHONUNBUFFERED:  1
+      PREFECT_API_URL:   http://127.0.0.1:4200/api  # client connects to server running in same container
+    ports:
+      - "4200:4200"                 # Prefect UI at http://localhost:4200
+    volumes:
+      - ./orch:/app
+      - ./data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - mmm_network
+
+  # ── 6. Documentation (MkDocs) ───────────────────────────
+  docs:
+    build:
+      context: ./docs
+      dockerfile: Dockerfile
+    container_name: mmm_docs
+    restart: unless-stopped
+    ports:
+      - "8080:8080"                 # MkDocs live preview at http://localhost:8080
+    volumes:
+      - ./docs:/docs                # live-reload: edits appear instantly
+    networks:
+      - mmm_network
+
+# ── Volumes ──────────────────────────────────────────────
+volumes:
+  db_data:      # persists PostgreSQL data between restarts
+
+# ── Network ──────────────────────────────────────────────
+networks:
+  mmm_network:
+    driver: bridge   # all containers can reach each other by service name

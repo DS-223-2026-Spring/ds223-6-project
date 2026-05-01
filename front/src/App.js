@@ -1,141 +1,92 @@
-// App.js – MMM Platform Dashboard skeleton
-// Uses ApiService for all backend calls.
-// Replace placeholder sections with real components in Sprint 3.
-
 import { useState, useEffect } from "react";
 import ApiService from "./components/ApiService";
-import MetricCard from "./components/MetricCard";
-import LoadingSpinner from "./components/LoadingSpinner";
+import Overview       from "./pages/Overview";
+import ChannelDeepDive from "./pages/ChannelDeepDive";
+import BudgetOptimizer from "./pages/BudgetOptimizer";
+import ModelSettings   from "./pages/ModelSettings";
 
-const PAGES = ["Overview", "Channels", "Budget Optimizer", "Model Settings"];
+const PAGES = [
+  { id: "overview",   label: "Overview" },
+  { id: "channels",   label: "Channels" },
+  { id: "optimizer",  label: "Budget Optimizer" },
+  { id: "model",      label: "Model Settings" },
+];
 
-function App() {
-  const [page, setPage]       = useState("Overview");
-  const [health, setHealth]   = useState(null);
-  const [results, setResults] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState(null);
+export default function App() {
+  const [page,   setPage]   = useState("overview");
+  const [health, setHealth] = useState(null);
 
   useEffect(() => {
-    async function fetchData() {
-      try {
-        const [h, r] = await Promise.all([
-          ApiService.getHealth(),
-          ApiService.getResults(),
-        ]);
-        setHealth(h);
-        setResults(r);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchData();
+    ApiService.getHealth()
+      .then(setHealth)
+      .catch(() => setHealth({ status: "degraded", database: "unreachable" }));
   }, []);
 
+  const dbOk = health?.database === "connected";
+
+  const content = {
+    overview:  <Overview />,
+    channels:  <ChannelDeepDive />,
+    optimizer: <BudgetOptimizer />,
+    model:     <ModelSettings />,
+  };
+
   return (
-    <div style={{ fontFamily: "sans-serif", padding: "2rem", maxWidth: 960 }}>
+    <div style={styles.shell}>
+      {/* Sidebar */}
+      <aside style={styles.sidebar}>
+        <div style={styles.logo}>
+          <span style={styles.logoMark}>MMM</span>
+          <span style={styles.logoSub}>Platform</span>
+        </div>
 
-      {/* Header */}
-      <h1 style={{ color: "#1F4E79", marginBottom: 4 }}>MMM Platform</h1>
-      <p style={{ color: "#595959", marginBottom: 8 }}>
-        Marketing Mix Modeling Dashboard
-      </p>
-      {health && (
-        <span style={{
-          fontSize: 11, padding: "2px 10px", borderRadius: 20,
-          background: health.database === "connected" ? "#E2F0D9" : "#FCE4D6",
-          color:      health.database === "connected" ? "#1D6A38" : "#843C1D",
-        }}>
-          DB: {health.database}
-        </span>
-      )}
-
-      {/* Navigation */}
-      <nav style={{ display: "flex", gap: 16, margin: "20px 0 24px",
-                    borderBottom: "1px solid #ddd", paddingBottom: 12 }}>
-        {PAGES.map(name => (
-          <button key={name} onClick={() => setPage(name)} style={{
-            background: "none", border: "none", cursor: "pointer",
-            color:      page === name ? "#1F4E79" : "#2E75B6",
-            fontWeight: page === name ? 600 : 400,
-            fontSize:   14,
-            borderBottom: page === name ? "2px solid #1F4E79" : "none",
-            paddingBottom: 4,
-          }}>
-            {name}
+        {PAGES.map(p => (
+          <button key={p.id} onClick={() => setPage(p.id)}
+            style={{ ...styles.navItem, ...(page === p.id ? styles.navActive : {}) }}>
+            {p.label}
           </button>
         ))}
-      </nav>
 
-      {/* Content */}
-      {loading && <LoadingSpinner message="Connecting to API..." />}
-      {error   && <div style={{ color: "#843C1D", background: "#FCE4D6",
-                                padding: "1rem", borderRadius: 8 }}>
-                    Error: {error}
-                  </div>}
-
-      {!loading && !error && page === "Overview" && (
-        <>
-          {/* KPI cards — data comes from GET /results */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)",
-                        gap: 12, marginBottom: 28 }}>
-            <MetricCard label="Model version"  value={results?.model_version ?? "—"} />
-            <MetricCard label="Model R²"       value={results?.r_squared
-                                                        ? results.r_squared.toFixed(2)
-                                                        : "—"} />
-            <MetricCard label="Channels"       value={results?.channels?.length ?? "—"} />
-            <MetricCard label="Best ROI"
-              value={results?.channels?.length
-                ? results.channels[0].channel
-                : "—"}
-              sub={results?.channels?.length
-                ? `$${results.channels[0].roi_estimate?.toFixed(2)} per $1`
-                : null}
-            />
+        <div style={styles.sidebarBottom}>
+          <div style={{
+            ...styles.dbPill,
+            background: dbOk ? "#E2F0D9" : "#FCE4D6",
+            color:      dbOk ? "#1D6A38" : "#843C1D",
+          }}>
+            DB: {health ? health.database : "checking..."}
           </div>
-
-          {/* ROI chart placeholder — Sprint 3 will use Recharts BarChart */}
-          <div style={{ background: "#F4F4F4", borderRadius: 8, padding: "2rem",
-                        textAlign: "center", color: "#888", marginBottom: 16 }}>
-            ROI bar chart — Sprint 3 (data from GET /results → channels[])
-          </div>
-
-          {/* Optimizer placeholder */}
-          <div style={{ background: "#F4F4F4", borderRadius: 8, padding: "2rem",
-                        textAlign: "center", color: "#888" }}>
-            Budget optimizer — Sprint 4 (POST /optimize with total_budget + constraints)
-          </div>
-        </>
-      )}
-
-      {!loading && !error && page === "Channels" && (
-        <div style={{ background: "#F4F4F4", borderRadius: 8, padding: "2rem",
-                      textAlign: "center", color: "#888" }}>
-          Channel deep dive — Sprint 3
-          <br /><small>Needs: GET /results → channels[] with roi_estimate and contribution_pct</small>
+          <div style={styles.version}>v3.0 · Sprint 3</div>
         </div>
-      )}
+      </aside>
 
-      {!loading && !error && page === "Budget Optimizer" && (
-        <div style={{ background: "#F4F4F4", borderRadius: 8, padding: "2rem",
-                      textAlign: "center", color: "#888" }}>
-          Budget optimizer sliders — Sprint 4
-          <br /><small>Needs: POST /optimize &#123; total_budget, constraints &#125; → allocation, predicted_revenue</small>
+      {/* Main content */}
+      <main style={styles.main}>
+        <div style={styles.topBar}>
+          <h1 style={styles.pageTitle}>
+            {PAGES.find(p => p.id === page)?.label}
+          </h1>
         </div>
-      )}
-
-      {!loading && !error && page === "Model Settings" && (
-        <div style={{ background: "#F4F4F4", borderRadius: 8, padding: "2rem",
-                      textAlign: "center", color: "#888" }}>
-          Model run history — Sprint 4
-          <br /><small>Needs: GET /model-runs → runs[]</small>
+        <div style={styles.content}>
+          {content[page]}
         </div>
-      )}
-
+      </main>
     </div>
   );
 }
 
-export default App;
+const styles = {
+  shell:       { display:"flex", minHeight:"100vh", fontFamily:"'Segoe UI', system-ui, sans-serif", background:"#F5F6FA", color:"#1a1a1a" },
+  sidebar:     { width:180, flexShrink:0, background:"#fff", borderRight:"0.5px solid #e0e0e0", display:"flex", flexDirection:"column", padding:"0 0 16px 0" },
+  logo:        { padding:"20px 18px 16px", borderBottom:"0.5px solid #e0e0e0", marginBottom:8 },
+  logoMark:    { fontSize:16, fontWeight:700, color:"#1F4E79", display:"block" },
+  logoSub:     { fontSize:11, color:"#888" },
+  navItem:     { width:"100%", textAlign:"left", padding:"9px 18px", border:"none", background:"transparent", cursor:"pointer", fontSize:13, color:"#595959", borderLeft:"3px solid transparent", transition:"all .1s" },
+  navActive:   { background:"#EBF3FB", color:"#1F4E79", fontWeight:500, borderLeftColor:"#2E75B6" },
+  sidebarBottom:{ marginTop:"auto", padding:"0 14px" },
+  dbPill:      { fontSize:11, fontWeight:500, padding:"4px 10px", borderRadius:20, textAlign:"center", marginBottom:6 },
+  version:     { fontSize:10, color:"#bbb", textAlign:"center" },
+  main:        { flex:1, display:"flex", flexDirection:"column", minWidth:0 },
+  topBar:      { padding:"18px 24px 0", borderBottom:"0.5px solid #e0e0e0", background:"#fff" },
+  pageTitle:   { fontSize:18, fontWeight:500, color:"#1F4E79", margin:"0 0 14px 0" },
+  content:     { padding:20, flex:1, overflowY:"auto" },
+};

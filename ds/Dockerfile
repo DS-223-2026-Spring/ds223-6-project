@@ -22,6 +22,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the service code
 COPY . .
 
-# Keep container alive so you can exec into it and run scripts
-# In Sprint 2 this becomes: CMD ["python", "pipeline/run_pipeline.py"]
-CMD ["tail", "-f", "/dev/null"]
+# Install uvicorn for the trigger API (fastapi already in requirements)
+RUN pip install --no-cache-dir uvicorn==0.29.0 fastapi==0.111.0
+
+# Start the trigger API so back container can call POST /run to retrain
+# Port 5000 is internal only — not exposed to host
+CMD ["uvicorn", "trigger:app", "--host", "0.0.0.0", "--port", "5000"]

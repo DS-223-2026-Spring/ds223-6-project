@@ -36,7 +36,6 @@ CSV files (data/)
   front service       ← React — dashboard with charts, KPI cards, and budget sliders
       │
   orch service        ← Prefect — orchestrates and schedules the pipeline
-  docs service        ← MkDocs — live documentation site
 ```
 
 All six services run in Docker containers on a shared network. They communicate with each other using service names (e.g. `back` reaches `db` at `db:5432`).
@@ -52,7 +51,6 @@ All six services run in Docker containers on a shared network. They communicate 
 | Backend API | `mmm_back` | **8000** | FastAPI REST API + Swagger UI |
 | Frontend | `mmm_front` | **3000** | React dashboard |
 | Orchestration | `mmm_orch` | **4200** | Prefect workflow UI |
-| Documentation | `mmm_docs` | **8080** | MkDocs site |
 
 ---
 

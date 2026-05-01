@@ -1,10 +1,7 @@
 """
 load_data.py
-Loads the three Robyn CSV files into PostgreSQL.
-Column names are matched to the ACTUAL Robyn dataset structure.
-
-Safe to run multiple times — uses INSERT ... ON CONFLICT DO NOTHING
-so re-runs will not duplicate rows.
+Loads all Robyn CSV files into PostgreSQL including organic signals.
+Safe to run multiple times — uses ON CONFLICT DO NOTHING.
 
 Run:
     docker exec mmm_db python load_data.py
@@ -21,17 +18,8 @@ DATA_DIR = os.getenv("DATA_DIR", "/app/data")
 
 def load_spend_and_revenue(filepath: str):
     """
-    Reads dt_simulated_weekly.csv (208 rows, weekly 2015-11-23 to 2019-11-11).
-
-    Actual columns:
-      DATE, revenue, tv_S, ooh_S, print_S, facebook_I, search_clicks_P,
-      search_S, competitor_sales_B, facebook_S, events, newsletter
-
-    Splits into:
-      - revenue_data    (1 row per week: DATE + revenue)
-      - raw_spend_data  (5 rows per week: one per paid channel)
-
-    Uses ON CONFLICT DO NOTHING — safe to re-run without duplicating data.
+    Reads dt_simulated_weekly.csv.
+    Loads revenue_data, raw_spend_data, and organic_signals tables.
     """
     print(f"\nLoading {filepath}...")
     df = pd.read_csv(filepath)
@@ -40,7 +28,7 @@ def load_spend_and_revenue(filepath: str):
     conn   = get_connection()
     cursor = conn.cursor()
 
-    # ── Revenue (ON CONFLICT because week_start has UNIQUE constraint) ──────
+    # ── Revenue ──────────────────────────────────────────────────────────────
     inserted_rev = 0
     for _, row in df.iterrows():
         cursor.execute("""
@@ -50,9 +38,9 @@ def load_spend_and_revenue(filepath: str):
         """, (row["DATE"], float(row["revenue"])))
         inserted_rev += cursor.rowcount
     conn.commit()
-    print(f"  revenue_data:    {inserted_rev} rows inserted (skipped duplicates)")
+    print(f"  revenue_data:      {inserted_rev} rows inserted")
 
-    # ── Spend (ON CONFLICT on (week_start, channel) unique constraint) ──────
+    # ── Paid spend (wide -> long) ────────────────────────────────────────────
     spend_map = {
         "tv_S":       "tv",
         "ooh_S":      "ooh",
@@ -70,30 +58,48 @@ def load_spend_and_revenue(filepath: str):
             """, (row["DATE"], channel, float(row[col])))
             inserted_spend += cursor.rowcount
     conn.commit()
+    print(f"  raw_spend_data:    {inserted_spend} rows inserted  ({inserted_spend//5 if inserted_spend else 0} weeks x 5 channels)")
+
+    # ── Organic signals ──────────────────────────────────────────────────────
+    inserted_org = 0
+    for _, row in df.iterrows():
+        event_val = str(row.get("events", "na")).strip()
+        if event_val.lower() == "nan":
+            event_val = "na"
+        cursor.execute("""
+            INSERT INTO organic_signals
+                (week_start, competitor_sales, newsletter_subs,
+                 facebook_impressions, search_clicks, event_flag)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (week_start) DO NOTHING
+        """, (
+            row["DATE"],
+            float(row.get("competitor_sales_B", 0)),
+            float(row.get("newsletter", 0)),
+            float(row.get("facebook_I", 0)),
+            float(row.get("search_clicks_P", 0)),
+            event_val,
+        ))
+        inserted_org += cursor.rowcount
+    conn.commit()
     conn.close()
-    print(f"  raw_spend_data:  {inserted_spend} rows inserted (skipped duplicates)")
+    print(f"  organic_signals:   {inserted_org} rows inserted")
 
 
 def load_holidays(filepath: str):
     """
-    Reads dt_prophet_holidays.csv (87,651 rows, 123 countries, 1995-2044).
-    Filters to US (588 rows) and stores as JSON reference in model_runs.
-    Safe to re-run — checks if holiday_ref already exists first.
+    Stores US holiday dates as JSON reference in model_runs.
+    Skips if already loaded.
     """
     print(f"\nLoading {filepath}...")
     df = pd.read_csv(filepath)
-    print(f"  Total rows: {len(df)}  |  Countries: {df['country'].nunique()}")
+    us = df[df["country"] == "US"]
+    us_dates = sorted(set(us["ds"].tolist()))
+    print(f"  US holidays: {len(us_dates)} unique dates")
 
-    us       = df[df['country'] == 'US'].copy()
-    us_dates = set(us['ds'].tolist())
-    print(f"  US holidays: {len(us)} rows  |  Unique dates: {len(us_dates)}")
-
-    # Check if already loaded
-    existing = select_query(
-        "SELECT id FROM model_runs WHERE model_version = %s", ("holiday_ref",)
-    )
+    existing = select_query("SELECT id FROM model_runs WHERE model_version = %s", ("holiday_ref",))
     if existing:
-        print(f"  Holiday reference already exists (id={existing[0]['id']}) — skipping")
+        print(f"  Already loaded (id={existing[0]['id']}) — skipping")
         return
 
     conn   = get_connection()
@@ -102,32 +108,27 @@ def load_holidays(filepath: str):
         INSERT INTO model_runs (model_version, status, notes, hyperparameters)
         VALUES (%s, %s, %s, %s)
     """, (
-        "holiday_ref",
-        "reference",
-        "US holiday dates from dt_prophet_holidays.csv — used by pipeline to set holiday_flag",
-        json.dumps({"us_holiday_dates": sorted(us_dates)})
+        "holiday_ref", "reference",
+        "US holiday dates from dt_prophet_holidays.csv",
+        json.dumps({"us_holiday_dates": us_dates})
     ))
     conn.commit()
     conn.close()
-    print(f"  Holiday reference stored in model_runs (status=reference)")
+    print(f"  Stored {len(us_dates)} US holiday dates in model_runs")
 
 
 def load_curve_params(filepath: str):
     """
-    Reads df_curve_reach_freq.csv (300 rows, 10 frequency buckets).
-    Stores saturation curve parameters as JSON in model_runs.
-    Safe to re-run — checks if curve_ref already exists first.
+    Stores saturation curve params as JSON reference in model_runs.
+    Skips if already loaded.
     """
     print(f"\nLoading {filepath}...")
     df = pd.read_csv(filepath)
-    print(f"  Shape: {df.shape}  |  Freq buckets: {sorted(df['freq_bucket'].unique().tolist())}")
+    print(f"  Shape: {df.shape}  |  Freq buckets: {df['freq_bucket'].nunique()}")
 
-    # Check if already loaded
-    existing = select_query(
-        "SELECT id FROM model_runs WHERE model_version = %s", ("curve_ref",)
-    )
+    existing = select_query("SELECT id FROM model_runs WHERE model_version = %s", ("curve_ref",))
     if existing:
-        print(f"  Curve reference already exists (id={existing[0]['id']}) — skipping")
+        print(f"  Already loaded (id={existing[0]['id']}) — skipping")
         return
 
     params = {}
@@ -143,28 +144,28 @@ def load_curve_params(filepath: str):
         INSERT INTO model_runs (model_version, status, notes, hyperparameters)
         VALUES (%s, %s, %s, %s)
     """, (
-        "curve_ref",
-        "reference",
-        "Saturation curve params from df_curve_reach_freq.csv — calibrates Hill function K",
+        "curve_ref", "reference",
+        "Saturation curve params from df_curve_reach_freq.csv",
         json.dumps(params)
     ))
     conn.commit()
     conn.close()
-    print(f"  Curve parameters stored in model_runs (status=reference)")
+    print(f"  Stored {len(params)} frequency bucket curves in model_runs")
 
 
 def validate_load():
-    """Prints row counts and spot-checks the loaded data."""
+    """Validates row counts after loading."""
     print("\n=== Validation ===")
-    checks = [
-        ("raw_spend_data", 1040, "208 weeks x 5 channels"),
-        ("revenue_data",    208, "208 weeks"),
+    expected = [
+        ("raw_spend_data",  1040, "208 weeks x 5 channels"),
+        ("revenue_data",     208, "208 weeks"),
+        ("organic_signals",  208, "208 weeks"),
     ]
     all_ok = True
-    for table, expected, note in checks:
+    for table, exp, note in expected:
         actual = count_rows(table)
-        ok     = actual >= expected
-        status = "OK" if ok else f"WARNING — expected {expected}"
+        ok     = actual >= exp
+        status = "OK" if ok else f"WARNING — expected {exp}"
         print(f"  {table:<25} {actual:>6} rows  ({note})  {status}")
         if not ok:
             all_ok = False
@@ -181,25 +182,22 @@ def validate_load():
 
 if __name__ == "__main__":
     print("=== MMM Data Loader ===")
-    print("Verifying database connection...")
-
     if not verify_connection():
-        print("Cannot connect to database. Is the db container running?")
+        print("Cannot connect to database.")
         sys.exit(1)
 
     files = {
-        "dt_simulated_weekly": os.path.join(DATA_DIR, "dt_simulated_weekly.csv"),
-        "dt_prophet_holidays": os.path.join(DATA_DIR, "dt_prophet_holidays.csv"),
-        "df_curve_reach_freq": os.path.join(DATA_DIR, "df_curve_reach_freq.csv"),
+        "weekly":   os.path.join(DATA_DIR, "dt_simulated_weekly.csv"),
+        "holidays": os.path.join(DATA_DIR, "dt_prophet_holidays.csv"),
+        "curves":   os.path.join(DATA_DIR, "df_curve_reach_freq.csv"),
     }
     for name, path in files.items():
         if not os.path.exists(path):
             print(f"\nMissing: {path}")
-            print("Place CSV files in the /data folder and re-run.")
             sys.exit(1)
 
-    load_spend_and_revenue(files["dt_simulated_weekly"])
-    load_holidays(files["dt_prophet_holidays"])
-    load_curve_params(files["df_curve_reach_freq"])
+    load_spend_and_revenue(files["weekly"])
+    load_holidays(files["holidays"])
+    load_curve_params(files["curves"])
     validate_load()
     print("\nData loading complete.")

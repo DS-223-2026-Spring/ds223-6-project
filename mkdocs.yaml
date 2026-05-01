@@ -1,0 +1,27 @@
+site_name: MMM Platform Docs
+site_description: Marketing Mix Modeling Platform – Developer Documentation
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Setup Guide: how-to-run.md
+  - Services:
+      - Backend: services/back.md
+      - Database: services/db.md
+      - Data Science: services/ds.md
+      - Frontend: services/front.md
+      - Orchestrator: services/orch.md
+
+theme:
+  name: material
+  # palette:
+  #   primary: blue
+  #   accent: light blue
+  features:
+    - navigation.tabs
+    - navigation.sections
+
+plugins:
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: ["."] # Allows it to find the 'back', 'db', etc., folders in root

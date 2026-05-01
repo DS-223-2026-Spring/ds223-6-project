@@ -56,6 +56,12 @@ services:
         condition: service_healthy  # waits for DB to be ready
     networks:
       - mmm_network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   # ── 3. Backend API ──────────────────────────────────────
   back:
@@ -75,6 +81,7 @@ services:
       - "8000:8000"                 # FastAPI + Swagger UI at http://localhost:8000/docs
     volumes:
       - ./back:/app
+      - ./ds:/ds                    # retrain endpoint needs access to baseline.py
     depends_on:
       db:
         condition: service_healthy
@@ -120,6 +127,8 @@ services:
     volumes:
       - ./orch:/app
       - ./data:/app/data
+      - ./ds:/ds                    # baseline.py accessible at /ds/models/baseline.py
+      - ./db:/db                    # load_data.py accessible at /db/load_data.py
     depends_on:
       db:
         condition: service_healthy
@@ -129,16 +138,16 @@ services:
   # ── 6. Documentation (MkDocs) ───────────────────────────
   # docs:
   #   build:
-  #    context: ./docs
-  #    dockerfile: Dockerfile
-  #  container_name: mmm_docs
-  #  restart: unless-stopped
-  #  ports:
-  #    - "8080:8080"                 # MkDocs live preview at http://localhost:8080
-  #  volumes:
-  #    - ./docs:/docs                # live-reload: edits appear instantly
-  #  networks:
-  #    - mmm_network
+  #     context: ./docs
+  #     dockerfile: Dockerfile
+  #   container_name: mmm_docs
+  #   restart: unless-stopped
+  #   ports:
+  #     - "8080:8080"                 # MkDocs live preview at http://localhost:8080
+  #   volumes:
+  #     - ./docs:/docs                # live-reload: edits appear instantly
+  #   networks:
+  #     - mmm_network
 
 # ── Volumes ──────────────────────────────────────────────
 volumes:

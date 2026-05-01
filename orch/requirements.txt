@@ -10,3 +10,8 @@ sqlalchemy==2.0.30
 # Utilities
 python-dotenv==1.0.1
 pandas==2.2.2
+scikit-learn==1.4.2
+statsmodels==0.14.2
+pymc==5.15.0          # Bayesian upgrade (Sprint 4 stretch goal)
+numpy==1.26.4
+scipy==1.13.0

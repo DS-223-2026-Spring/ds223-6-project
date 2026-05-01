@@ -52,6 +52,7 @@ All six services run in Docker containers on a shared network. They communicate 
 | Backend API | `mmm_back` | **8000** | FastAPI REST API + Swagger UI |
 | Frontend | `mmm_front` | **3000** | React dashboard |
 | Orchestration | `mmm_orch` | **4200** | Prefect workflow UI |
+| Documentation | `mmm_docs` | **8080** | MkDocs site |
 
 ---
 
@@ -247,18 +248,28 @@ docker exec mmm_orch python pipeline_flow.py
 |--------|-------|-------|--------|
 | 1 | 1–2 | Infrastructure: Docker, DB schema, base services | ✅ Complete |
 | 2 | 3–4 | Pipeline + Model: transforms, OLS, DB writes | ✅ Complete |
-| 3 | 5–6 | API + Frontend: real charts, channel deep dive | 🔄 In progress |
-| 4 | 7–8 | Optimizer UI + Demo polish | 🔲 Planned |
+| 3 | 5–6 | Full model, real charts, optimizer UI, orchestration | ✅ Complete |
+| 4 | 7–8 | Demo polish, Bayesian upgrade (stretch), scheduling | 🔲 Planned |
 
-### Remaining work (Sprint 3–4)
-- Replace placeholder charts in `App.js` with real Recharts components (ROI bar chart, saturation curves)
-- Build the Budget Optimizer page with interactive sliders
-- Build the Scenario Comparison view
-- Wire `POST /retrain` to actually trigger `baseline.py`
-- Persist processed features to the `processed_features` table
-- Add organic variables (newsletter, competitor_sales) to the model
-- Fill in the per-service documentation pages in `docs/docs/services/`
-- Add Prefect scheduled deployment for weekly pipeline automation
+### Sprint 3 deliverables
+- ✅ Organic signals table — competitor sales, newsletter, events loaded and used in model
+- ✅ Processed features written to database after every model run
+- ✅ Channel recommendations (under/over/optimal) computed and displayed
+- ✅ Pydantic response schemas on all 10 endpoints — typed Swagger docs
+- ✅ POST /retrain wired to background task running baseline.py
+- ✅ React dashboard — full ROI bar chart, contribution chart, recommendations
+- ✅ Channel Deep Dive — saturation curve + adstock decay charts
+- ✅ Budget Optimizer — live optimizer, debounced API calls, scenario save/delete
+- ✅ Model Settings — run history table, retrain button, pipeline info
+- ✅ Two Prefect flows — test flow (fast) and full pipeline flow
+- ✅ Prefect pipeline_run_log — every run traceable in the database
+- ✅ All service documentation pages filled in
+
+### Remaining work (Sprint 4)
+- Bayesian model upgrade using PyMC (stretch goal)
+- Prefect scheduled deployment (weekly cron)
+- Scenario comparison side-by-side view
+- Export results to CSV
 
 ---
 

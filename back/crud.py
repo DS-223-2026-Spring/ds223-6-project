@@ -41,7 +41,8 @@ def get_latest_results(db: Session) -> dict:
 
     # Step 2: get the coefficients for that run
     coeff_rows = db.execute(text("""
-        SELECT channel, roi_estimate, contribution_pct, coefficient
+        SELECT channel, roi_estimate, contribution_pct, coefficient,
+               recommendation, predicted_revenue_contribution
         FROM   channel_coefficients
         WHERE  model_run_id = :run_id
         ORDER  BY roi_estimate DESC NULLS LAST
@@ -57,6 +58,8 @@ def get_latest_results(db: Session) -> dict:
                 "roi_estimate":     float(row.roi_estimate)    if row.roi_estimate    else None,
                 "contribution_pct": float(row.contribution_pct) if row.contribution_pct else None,
                 "coefficient":      float(row.coefficient)     if row.coefficient     else None,
+                "recommendation":   row.recommendation,
+                "predicted_revenue_contribution": float(row.predicted_revenue_contribution) if row.predicted_revenue_contribution else None,
             }
             for row in coeff_rows
         ]

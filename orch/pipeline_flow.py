@@ -20,6 +20,7 @@ import psycopg2
 from datetime import datetime
 from prefect import flow, task
 from prefect.logging import get_run_logger
+import urllib.request
 
 from config import (
     DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD,
@@ -248,25 +249,34 @@ def load_raw_data(force_reload: bool = False) -> dict:
 @task(name="run-model", retries=1, retry_delay_seconds=10)
 def run_model_task() -> dict:
     """
-    Runs the MMM model pipeline using ds/models/baseline.py.
-    Writes results to processed_features, model_runs, channel_coefficients.
-    Returns the new model_run_id.
+    Triggers baseline.py through the DS service API.
+    This keeps Prefect orchestration clean and avoids Docker-in-Docker issues.
     """
     logger = get_run_logger()
-    logger.info("  Running baseline.py...")
-    result = subprocess.run(
-        [sys.executable, MODEL_SCRIPT],
-        capture_output=True, text=True, timeout=300,
-        env={**os.environ, "PYTHONPATH": "/ds"},  # so baseline.py can import db_client
-    )
-    if result.returncode != 0:
-        logger.error(f"  baseline.py failed:\n{result.stderr}")
-        raise RuntimeError(f"Model training failed: {result.stderr[:500]}")
+    logger.info("  Triggering baseline.py via DS API...")
 
-    logger.info(result.stdout)
+    try:
+        req = urllib.request.Request(
+            url="http://ds:5000/run",
+            method="POST",
+            headers={"Content-Type": "application/json"},
+            data=b"{}"
+        )
 
-    # Read back the latest model run id from the DB
-    conn   = get_conn()
+        with urllib.request.urlopen(req, timeout=300) as response:
+            payload = json.loads(response.read().decode())
+
+        if payload.get("status") != "success":
+            logger.error(f"  baseline.py failed:\n{payload}")
+            raise RuntimeError(f"Model training failed: {payload}")
+
+        logger.info(payload.get("stdout", ""))
+
+    except Exception as e:
+        raise RuntimeError(f"Could not trigger DS pipeline: {str(e)}")
+
+    # Read latest model run from DB
+    conn = get_conn()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT id, model_version, r_squared
@@ -280,7 +290,12 @@ def run_model_task() -> dict:
 
     if row:
         logger.info(f"  Model run id={row[0]}  version={row[1]}  R²={row[2]}")
-        return {"model_run_id": row[0], "model_version": row[1], "r_squared": float(row[2]) if row[2] else None}
+        return {
+            "model_run_id": row[0],
+            "model_version": row[1],
+            "r_squared": float(row[2]) if row[2] else None,
+        }
+
     return {"model_run_id": None}
 
 
@@ -385,9 +400,60 @@ def mmm_pipeline_full(
         raise
 
 
+# ── Deployment (Prefect scheduling) ──────────────────────────────────────────
+
+def create_deployments():
+    """
+    Creates Prefect deployments for automated scheduling.
+
+    Deployments allow the flows to be triggered from the Prefect UI
+    or run on a schedule without manual docker exec commands.
+
+    Run:
+        docker exec mmm_orch python pipeline_flow.py --deploy
+    """
+    from prefect.client.schemas.schedules import CronSchedule
+
+    # Test flow — runs daily at midnight to verify infrastructure
+    mmm_pipeline_test.serve(
+        name="mmm-test-daily",
+        schedules=[CronSchedule(cron="0 0 * * *", timezone="UTC")],
+        tags=["mmm", "test"],
+    )
+
+    # Full pipeline — runs every Monday at 06:00 UTC
+    mmm_pipeline_full.serve(
+        name="mmm-full-weekly",
+        schedules=[CronSchedule(cron="0 6 * * 1", timezone="UTC")],
+        tags=["mmm", "production"],
+        parameters={"force_reload": False, "run_model": True},
+    )
+
+
+def manual_trigger():
+    """
+    Runs the full pipeline immediately and waits for completion.
+    Useful for demo or integration testing.
+
+    Run:
+        docker exec mmm_orch python pipeline_flow.py --run
+    """
+    import json
+    result = mmm_pipeline_full(force_reload=RELOAD_DATA, run_model=True)
+    print("\n=== PIPELINE RESULT ===")
+    print(json.dumps(result, indent=2, default=str))
+    return result
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     if "--test" in sys.argv:
         mmm_pipeline_test()
+    elif "--deploy" in sys.argv:
+        print("Creating Prefect deployments...")
+        create_deployments()
+    elif "--run" in sys.argv:
+        manual_trigger()
     else:
+        # Default: run full pipeline
         mmm_pipeline_full(force_reload=RELOAD_DATA, run_model=True)

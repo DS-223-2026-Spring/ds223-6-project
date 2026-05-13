@@ -12,6 +12,23 @@ const PAGES = [
   { id: "model",      label: "Model Settings" },
 ];
 
+// Responsive CSS injected at runtime
+const RESPONSIVE_CSS = `
+  @media (max-width: 900px) {
+    .mmm-sidebar { display: none !important; }
+    .mmm-main { padding: 12px !important; }
+    .mmm-topbar { padding: 12px 12px 0 !important; }
+    .mmm-kpi-grid { grid-template-columns: repeat(2, 1fr) !important; }
+    .mmm-grid2 { grid-template-columns: 1fr !important; }
+    .mmm-stat-grid { grid-template-columns: repeat(2, 1fr) !important; }
+  }
+  @media (max-width: 600px) {
+    .mmm-kpi-grid { grid-template-columns: 1fr 1fr !important; }
+    .mmm-stat-grid { grid-template-columns: 1fr 1fr !important; }
+    .mmm-grid2 { grid-template-columns: 1fr !important; }
+  }
+`;
+
 export default function App() {
   const [page,   setPage]   = useState("overview");
   const [health, setHealth] = useState(null);
@@ -32,9 +49,11 @@ export default function App() {
   };
 
   return (
-    <div style={styles.shell}>
+    <>
+      <style>{RESPONSIVE_CSS}</style>
+      <div style={styles.shell}>
       {/* Sidebar */}
-      <aside style={styles.sidebar}>
+      <aside style={styles.sidebar} className="mmm-sidebar">
         <div style={styles.logo}>
           <span style={styles.logoMark}>MMM</span>
           <span style={styles.logoSub}>Platform</span>
@@ -60,17 +79,18 @@ export default function App() {
       </aside>
 
       {/* Main content */}
-      <main style={styles.main}>
-        <div style={styles.topBar}>
+      <main style={styles.main} className="mmm-main">
+        <div style={styles.topBar} className="mmm-topbar">
           <h1 style={styles.pageTitle}>
             {PAGES.find(p => p.id === page)?.label}
           </h1>
         </div>
-        <div style={styles.content}>
+        <div style={styles.content} className="mmm-content">
           {content[page]}
         </div>
       </main>
     </div>
+    </>
   );
 }
 

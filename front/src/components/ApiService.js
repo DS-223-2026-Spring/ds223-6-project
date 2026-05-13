@@ -51,6 +51,19 @@ const ApiService = {
 
   // ── Data summary ─────────────────────────────────────────
   getDataSummary: () => request("GET", "/data-summary"),
+
+  // ── Analytics endpoints (Sprint 4) ───────────────────────
+  getPredictions:    (modelRunId = null) =>
+    request("GET", modelRunId ? `/predictions?model_run_id=${modelRunId}` : "/predictions"),
+  getOrganicSignals: () => request("GET", "/organic-signals"),
+  getPipelineRuns:   () => request("GET", "/pipeline-runs"),
+
+  // ── Channel deep dive ─────────────────────────────────────────
+  getChannelWeekly:  () => request("GET", "/channel-weekly"),
+
+  // ── Model type ────────────────────────────────────────────────
+  getModelTypes:     () => request("GET", "/model-types"),
+  retrainBayesian: (draws = 500) => request("POST", "/retrain-bayesian", { draws }),
 };
 
 export default ApiService;

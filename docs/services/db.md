@@ -10,8 +10,8 @@ PostgreSQL 15 database — stores all raw data, features, and model outputs.
 | `revenue_data` | 208 | Weekly total revenue |
 | `organic_signals` | 208 | Competitor sales, newsletter, events, impressions |
 | `processed_features` | 1040 | Adstock + saturation values per week/channel |
-| `model_runs` | varies | One row per training run — R², hyperparameters, status |
-| `channel_coefficients` | varies | ROI, contribution %, recommendation per channel per run |
+| `model_runs` | varies | One row per training run — R², hyperparameters, status, model type |
+| `channel_coefficients` | varies | ROI, contribution %, recommendation, credible intervals per channel per run |
 | `budget_scenarios` | varies | Saved optimizer results with allocation JSON |
 | `pipeline_run_log` | varies | Prefect/manual run audit trail |
 
@@ -56,18 +56,16 @@ from db_helpers import (
 ```
 
 ## ERD (text)
-
-```
 raw_spend_data ──────────┐
 revenue_data             ├── DS pipeline ──> processed_features
 organic_signals ─────────┘                  model_runs ──> channel_coefficients
-                                            model_runs ──> budget_scenarios
-                                            pipeline_run_log
-```
+model_runs ──> budget_scenarios
+pipeline_run_log
 
 ## Assumptions
 
 - All monetary values use `NUMERIC` to avoid floating-point rounding errors.
 - `allocation_json` and `hyperparameters` columns use PostgreSQL `JSONB`.
 - Schema is created automatically on first `docker-compose up` via init scripts.
-- `02_add_organic_signals.sql` runs after `01_schema.sql` (alphabetical order).
+- Init scripts run in alphabetical order: `01_schema.sql` → `02_add_organic_signals.sql` → `03_add_predictions.sql`.
+- `channel_coefficients` has optional columns `roi_lower_90` and `roi_upper_90` (added for Bayesian model runs); the backend checks for their existence before querying.

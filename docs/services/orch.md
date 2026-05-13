@@ -8,27 +8,21 @@ Prefect UI: **http://localhost:4200**
 
 ### `mmm-pipeline-test` (fast, no side effects)
 Validates infrastructure only. Runs in seconds. Use during development.
-
-```
 check_source_files → check_db_connection → validate_data
-```
 
 ### `mmm-pipeline-full` (end-to-end)
 Full pipeline from CSV to trained model. Logs results to `pipeline_run_log`.
-
-```
 check_source_files
-      ↓
+↓
 check_db_connection
-      ↓
+↓
 load_raw_data        ← calls db/load_data.py via subprocess
-      ↓
+↓
 validate_data        ← asserts row counts, channels, data quality
-      ↓
+↓
 run_model_task       ← calls ds/models/baseline.py via subprocess
-      ↓
+↓
 log to pipeline_run_log
-```
 
 ## How to run
 
@@ -74,12 +68,11 @@ ORDER BY started_at DESC;
 - `run_model_task`: retries 1× with 10s delay
 - All failures are logged to `pipeline_run_log.status = 'failed'`
 
-## Manual jobs (Sprint 3)
+## Script locations inside the orch container
 
-These still run manually but will be connected to Prefect in Sprint 4:
+The `ds/` and `db/` folders are mounted into the `orch` container:
 
-| Job | Command |
-|-----|---------|
-| Load data | `docker exec mmm_db python load_data.py` |
-| Train model | `docker exec mmm_ds python models/baseline.py` |
-| Full pipeline | `docker exec mmm_orch python pipeline_flow.py` |
+| Script | Mounted path |
+|--------|-------------|
+| `db/load_data.py` | `/db/load_data.py` |
+| `ds/models/baseline.py` | `/ds/models/baseline.py` |

@@ -44,6 +44,7 @@ ADSTOCK_DECAY = {
     "search":   0.12,
 }
 
+# Hill K fractions — defaults, overridden by calibrate_hill_k() if curve data exists
 HILL_K_FRACTION = {
     "tv":       0.50,
     "ooh":      0.45,
@@ -52,6 +53,80 @@ HILL_K_FRACTION = {
     "search":   0.35,
 }
 HILL_N = 2.0
+
+
+def calibrate_hill_k(spend_df: pd.DataFrame, engine) -> dict:
+    """
+    Calibrates Hill function K values using df_curve_reach_freq data
+    stored in model_runs (status='curve_ref').
+
+    The reach/frequency curves show the spend-to-response relationship
+    for different frequency buckets. We use the "reach 1+" bucket
+    (minimum frequency) as the baseline saturation curve.
+
+    K = spend level at which saturation reaches 50% of maximum.
+    We estimate this as the spend value at the midpoint of the response curve,
+    normalised by the maximum observed spend for each channel.
+
+    Returns updated HILL_K_FRACTION dict. Falls back to defaults if no curve data.
+    """
+    import json as _json
+    k_fractions = HILL_K_FRACTION.copy()
+
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(text("""
+                SELECT hyperparameters FROM model_runs
+                WHERE model_version = 'curve_ref' AND status = 'reference'
+                LIMIT 1
+            """)).fetchone()
+
+        if row is None or not row[0]:
+            return k_fractions
+
+        curve_data = row[0]  # already a dict from JSONB
+
+        # Use "reach 1+" bucket — minimum frequency baseline
+        bucket = "reach 1+"
+        if bucket not in curve_data:
+            bucket = list(curve_data.keys())[0]
+
+        spend_curve    = curve_data[bucket]["spend"]
+        response_curve = curve_data[bucket]["response"]
+
+        if not spend_curve or not response_curve:
+            return k_fractions
+
+        # Find spend at 50% of max response (K definition)
+        max_response = max(response_curve)
+        half_max     = max_response * 0.5
+        k_spend      = spend_curve[0]  # default to first point
+
+        for s, r in zip(spend_curve, response_curve):
+            if r >= half_max:
+                k_spend = s
+                break
+
+        # Normalise K by max spend per channel
+        # K fraction = K_spend / max(channel_spend)
+        channel_max_spend = (
+            spend_df.groupby("channel")["spend_usd"].max().to_dict()
+        )
+
+        for ch in CHANNELS:
+            max_s = channel_max_spend.get(ch, 1)
+            if max_s > 0:
+                k_frac = min(0.9, max(0.1, k_spend / max_s))
+                k_fractions[ch] = round(k_frac, 3)
+
+        print(f"  Hill K calibrated from df_curve_reach_freq ({bucket} bucket)")
+        for ch, k in k_fractions.items():
+            print(f"    {ch:<12}  K fraction = {k:.3f}")
+
+    except Exception as e:
+        print(f"  Hill K calibration failed ({e}) — using defaults")
+
+    return k_fractions
 
 MODEL_VERSION = "v2.0-ols-organic"
 
@@ -86,10 +161,46 @@ def apply_hill(series: pd.Series, k_fraction: float = 0.5, n: float = 2.0) -> pd
 
 # ── Feature engineering ───────────────────────────────────────────────────────
 
+def load_holiday_dates(engine) -> set:
+    """
+    Loads US holiday dates stored by load_data.py in model_runs (model_version='holiday_ref').
+    Returns a set of datetime.date objects. Returns empty set if not found.
+    """
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(text("""
+                SELECT hyperparameters FROM model_runs
+                WHERE model_version = 'holiday_ref' AND status = 'reference'
+                LIMIT 1
+            """)).fetchone()
+        if row is None or not row[0]:
+            print("  Holiday reference not found in DB — holiday_flag will be 0 for all weeks.")
+            return set()
+        dates_str = row[0].get("us_holiday_dates", [])
+        return {pd.to_datetime(d).date() for d in dates_str}
+    except Exception as e:
+        print(f"  Could not load holiday dates ({e}) — holiday_flag will be 0 for all weeks.")
+        return set()
+
+
+def make_holiday_flag(week_starts: pd.Series, holiday_dates: set, window: int = 3) -> pd.Series:
+    """
+    Returns a binary Series: 1 if the week contains or is within `window` days of a US holiday.
+    window=3 catches Mon-start weeks that straddle a mid-week holiday (e.g. Thanksgiving Thu).
+    """
+    def _is_holiday_week(d):
+        for offset in range(-window, window + 1):
+            if (d + pd.Timedelta(days=offset)).date() in holiday_dates:
+                return 1
+        return 0
+    return week_starts.apply(_is_holiday_week)
+
+
 def build_features(
     spend_df: pd.DataFrame,
     revenue_df: pd.DataFrame,
     organic_df: pd.DataFrame,
+    engine=None,
 ) -> pd.DataFrame:
     """
     Builds the full MMM feature matrix.
@@ -98,6 +209,7 @@ def build_features(
         spend_df:   raw_spend_data (long format — one row per channel per week)
         revenue_df: revenue_data
         organic_df: organic_signals (competitor sales, newsletter, events)
+        engine:     SQLAlchemy engine — required to load holiday dates from DB
 
     Returns:
         Wide DataFrame with one row per week containing:
@@ -105,6 +217,7 @@ def build_features(
         - adstock-transformed spend per channel
         - Hill-saturated spend per channel (these are the model regressors)
         - organic controls (competitor_sales, newsletter, event_flag encoded)
+        - holiday_flag: 1 if the week overlaps a US public holiday, 0 otherwise
         - seasonality controls (month, is_q4)
         - total_revenue (target)
     """
@@ -135,6 +248,15 @@ def build_features(
         df["newsletter_subs"]  = 0
         df["event_dummy"]      = 0
 
+    # Holiday flag — load US dates from DB reference row
+    if engine is not None:
+        holiday_dates = load_holiday_dates(engine)
+        df["holiday_flag"] = make_holiday_flag(df["week_start"], holiday_dates)
+        n_holiday = int(df["holiday_flag"].sum())
+        print(f"  holiday_flag: {n_holiday} holiday weeks out of {len(df)} total")
+    else:
+        df["holiday_flag"] = 0
+
     # Adstock + Hill saturation per channel
     for channel in CHANNELS:
         if channel not in df.columns:
@@ -154,7 +276,8 @@ def build_features(
 def get_feature_cols(df: pd.DataFrame) -> list:
     """Returns ordered list of regression feature columns."""
     saturated = [f"{ch}_saturated" for ch in CHANNELS if f"{ch}_saturated" in df.columns]
-    controls  = [c for c in ["competitor_sales", "newsletter_subs", "event_dummy", "is_q4", "month"]
+    controls  = [c for c in ["competitor_sales", "newsletter_subs", "event_dummy",
+                              "holiday_flag", "is_q4", "month"]
                  if c in df.columns]
     return saturated + controls
 
@@ -256,7 +379,7 @@ def write_processed_features(df: pd.DataFrame, engine):
                 "channel":         ch,
                 "adstock_value":   round(float(row[f"{ch}_adstock"]),   4),
                 "saturated_value": round(float(row[f"{ch}_saturated"]), 4),
-                "holiday_flag":    0,
+                "holiday_flag":    int(row.get("holiday_flag", 0)),
                 "promo_flag":      0,
             })
 
@@ -329,6 +452,22 @@ def write_results_to_db(model_results: dict, df: pd.DataFrame, spend_df: pd.Data
         "includes_organics": True,
     }
 
+    version    = model_results.get("model_version", MODEL_VERSION)
+    model_type = model_results.get("model_type", "ols")
+    if model_type == "bayesian":
+        notes_str = (
+            f"Bayesian MMM (PyMC) — {model_results.get('draws', 1000)} draws × "
+            f"{model_results.get('chains', 2)} chains. "
+            f"R²={model_results['r_squared']:.4f}. "
+            f"MAE=${model_results['mae_test']:,.0f}"
+        )
+    else:
+        notes_str = (
+            f"OLS with adstock + Hill saturation + organic controls. "
+            f"R²={model_results['r_squared']:.4f} (naive={model_results['r_squared_naive']:.4f}). "
+            f"MAE=${model_results['mae_test']:,.0f}"
+        )
+
     with engine.begin() as conn:
         result = conn.execute(text("""
             INSERT INTO model_runs
@@ -337,14 +476,10 @@ def write_results_to_db(model_results: dict, df: pd.DataFrame, spend_df: pd.Data
                 (:version, 'complete', :r2, CAST(:params AS jsonb), :notes)
             RETURNING id
         """), {
-            "version": MODEL_VERSION,
+            "version": version,
             "r2":      model_results["r_squared"],
             "params":  json.dumps(hyperparams),
-            "notes":   (
-                f"OLS with adstock + Hill saturation + organic controls. "
-                f"R²={model_results['r_squared']:.4f} (naive={model_results['r_squared_naive']:.4f}). "
-                f"MAE=${model_results['mae_test']:,.0f}"
-            ),
+            "notes":   notes_str,
         })
         run_id = result.fetchone()[0]
 
@@ -389,6 +524,46 @@ def write_results_to_db(model_results: dict, df: pd.DataFrame, spend_df: pd.Data
                 "pred_rev": pred_rev,
             })
 
+    # Write weekly predictions to model_predictions
+    predictions = model_results.get("predictions", [])
+    actuals     = model_results.get("actuals", [])
+    if predictions and actuals and len(predictions) == len(df):
+        pred_rows = []
+        for i, (week, actual, predicted) in enumerate(
+            zip(df["week_start"].dt.strftime("%Y-%m-%d"), actuals, predictions)
+        ):
+            pred_rows.append({
+                "model_run_id":      run_id,
+                "week_start":        week,
+                "actual_revenue":    round(float(actual), 2),
+                "predicted_revenue": round(float(predicted), 2),
+            })
+        with engine.begin() as conn:
+            # Ensure table exists (migration 03 defines it with a GENERATED residual column;
+            # if that migration already ran, this CREATE IF NOT EXISTS is a no-op)
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS model_predictions (
+                    id                SERIAL PRIMARY KEY,
+                    model_run_id      INTEGER,
+                    week_start        DATE,
+                    actual_revenue    NUMERIC(14,2),
+                    predicted_revenue NUMERIC(14,2),
+                    residual          NUMERIC(14,2),
+                    created_at        TIMESTAMP DEFAULT NOW()
+                )
+            """))
+            conn.execute(text(
+                "DELETE FROM model_predictions WHERE model_run_id = :run_id"
+            ), {"run_id": run_id})
+            for r in pred_rows:
+                conn.execute(text("""
+                    INSERT INTO model_predictions
+                        (model_run_id, week_start, actual_revenue, predicted_revenue)
+                    VALUES
+                        (:model_run_id, :week_start, :actual_revenue, :predicted_revenue)
+                """), r)
+        print(f"  model_predictions:  {len(pred_rows)} rows written")
+
     print(f"  model_runs.id = {run_id}  ({MODEL_VERSION}, R²={model_results['r_squared']:.4f})")
     print(f"  channel_coefficients: {len(CHANNELS)} rows")
     return run_id
@@ -413,7 +588,10 @@ if __name__ == "__main__":
     print(f"  Organic rows:  {len(organic_df)}")
 
     print("\nBuilding feature matrix...")
-    features = build_features(spend_df, revenue_df, organic_df)
+    engine = get_engine()
+    calibrated_k = calibrate_hill_k(spend_df, engine)
+    HILL_K_FRACTION.update(calibrated_k)
+    features = build_features(spend_df, revenue_df, organic_df, engine=engine)
     print(f"  Feature matrix: {features.shape[0]} rows x {features.shape[1]} cols")
     print(f"  Feature cols:   {get_feature_cols(features)}")
 

@@ -12,11 +12,34 @@ import os
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+class BayesianRunRequest(BaseModel):
+    draws: int = 500
+
 app = FastAPI(title="DS Trigger API")
 
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "mmm-ds-trigger"}
+
+
+@app.post("/run-bayesian")
+def run_bayesian_pipeline(payload: BayesianRunRequest):
+    """Triggers bayesian.py and returns stdout/stderr."""
+    script = os.path.join(os.path.dirname(__file__), "models", "bayesian.py")
+    try:
+        result = subprocess.run(
+            [sys.executable, script, str(payload.draws)],
+            capture_output=True, text=True, timeout=600,
+            cwd="/app",
+        )
+        if result.returncode != 0:
+            return {"status": "failed", "error": result.stderr[-1000:], "stdout": result.stdout[-500:]}
+        return {"status": "success", "stdout": result.stdout[-1000:]}
+    except subprocess.TimeoutExpired:
+        return {"status": "timeout", "error": "Bayesian sampling exceeded 10 minutes"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
 
 @app.post("/run")
 def run_pipeline():

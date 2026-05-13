@@ -11,6 +11,11 @@ sqlalchemy==2.0.30
 scikit-learn==1.4.2
 statsmodels==0.14.2
 pymc==5.15.0          # Bayesian upgrade (Sprint 4 stretch goal)
+arviz==0.18.0         # Required by bayesian.py for posterior analysis
+
+# Trigger API (DS container exposes POST /run for the back service)
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
 
 # Visualisation (for EDA notebook)
 matplotlib==3.8.4

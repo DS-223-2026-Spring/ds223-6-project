@@ -40,44 +40,63 @@ def get_latest_results(db: Session) -> dict:
         }
 
     # Step 2: get the coefficients for that run
-    coeff_rows = db.execute(text("""
-        SELECT channel, roi_estimate, contribution_pct, coefficient,
-               recommendation, predicted_revenue_contribution
+    # Check which optional columns exist (added in later migrations)
+    col_check = db.execute(text("""
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'channel_coefficients'
+    """)).fetchall()
+    existing = {r[0] for r in col_check}
+
+    select_cols = """channel, roi_estimate, contribution_pct, coefficient, recommendation,
+                     predicted_revenue_contribution"""
+    if "roi_lower_90" in existing:
+        select_cols += ", roi_lower_90, roi_upper_90"
+
+    coeff_rows = db.execute(text(f"""
+        SELECT {select_cols}
         FROM   channel_coefficients
         WHERE  model_run_id = :run_id
         ORDER  BY roi_estimate DESC NULLS LAST
     """), {"run_id": run_row.id}).fetchall()
 
+    def safe_float(val):
+        return float(val) if val is not None else None
+
+    channels_out = []
+    for row in coeff_rows:
+        row_dict = dict(row._mapping)
+        channels_out.append({
+            "channel":          row_dict.get("channel"),
+            "roi_estimate":     safe_float(row_dict.get("roi_estimate")),
+            "contribution_pct": safe_float(row_dict.get("contribution_pct")),
+            "coefficient":      safe_float(row_dict.get("coefficient")),
+            "recommendation":   row_dict.get("recommendation"),
+            "predicted_revenue_contribution": safe_float(row_dict.get("predicted_revenue_contribution")),
+            "roi_lower_90":     safe_float(row_dict.get("roi_lower_90")),
+            "roi_upper_90":     safe_float(row_dict.get("roi_upper_90")),
+        })
+
     return {
         "model_version": run_row.model_version,
-        "r_squared":     float(run_row.r_squared) if run_row.r_squared else None,
+        "r_squared":     safe_float(run_row.r_squared),
         "run_at":        str(run_row.run_at),
-        "channels": [
-            {
-                "channel":          row.channel,
-                "roi_estimate":     float(row.roi_estimate)    if row.roi_estimate    else None,
-                "contribution_pct": float(row.contribution_pct) if row.contribution_pct else None,
-                "coefficient":      float(row.coefficient)     if row.coefficient     else None,
-                "recommendation":   row.recommendation,
-                "predicted_revenue_contribution": float(row.predicted_revenue_contribution) if row.predicted_revenue_contribution else None,
-            }
-            for row in coeff_rows
-        ]
+        "channels":      channels_out,
     }
 
 
 # ── Model run history ─────────────────────────────────────────────────────────
 
-def get_model_runs(db: Session) -> list:
+def get_model_runs(db: Session, limit: int = 50, offset: int = 0) -> list:
     """
-    Returns all model runs ordered by most recent first.
+    Returns model runs ordered by most recent first.
     Table used: model_runs
     """
     rows = db.execute(text("""
         SELECT id, model_version, status, r_squared, run_at, notes
         FROM   model_runs
         ORDER  BY run_at DESC
-    """)).fetchall()
+        LIMIT  :limit OFFSET :offset
+    """), {"limit": limit, "offset": offset}).fetchall()
 
     return [
         {
@@ -94,7 +113,7 @@ def get_model_runs(db: Session) -> list:
 
 # ── Budget scenarios ──────────────────────────────────────────────────────────
 
-def get_all_scenarios(db: Session) -> list:
+def get_all_scenarios(db: Session, limit: int = 50, offset: int = 0) -> list:
     """
     Returns all saved budget scenarios ordered by most recent first.
     Table used: budget_scenarios
@@ -104,7 +123,8 @@ def get_all_scenarios(db: Session) -> list:
                predicted_revenue, created_at
         FROM   budget_scenarios
         ORDER  BY created_at DESC
-    """)).fetchall()
+        LIMIT  :limit OFFSET :offset
+    """), {"limit": limit, "offset": offset}).fetchall()
 
     return [
         {
@@ -253,3 +273,160 @@ def delete_scenario(db: Session, scenario_id: int) -> bool:
     )
     db.commit()
     return result.fetchone() is not None
+
+
+# ── Predictions (actual vs predicted per week) ────────────────────────────────
+
+def get_predictions(db: Session, model_run_id: int = None) -> list:
+    """
+    Returns weekly actual vs predicted revenue.
+    If model_run_id is None, uses the latest completed run.
+    Table used: model_predictions, model_runs
+    """
+    if model_run_id is None:
+        run_row = db.execute(text("""
+            SELECT id FROM model_runs
+            WHERE status = 'complete'
+            ORDER BY run_at DESC LIMIT 1
+        """)).fetchone()
+        if run_row is None:
+            return []
+        model_run_id = run_row.id
+
+    rows = db.execute(text("""
+        SELECT week_start, actual_revenue, predicted_revenue, residual
+        FROM   model_predictions
+        WHERE  model_run_id = :run_id
+        ORDER  BY week_start
+    """), {"run_id": model_run_id}).fetchall()
+
+    return [
+        {
+            "week_start":         str(row.week_start),
+            "actual_revenue":     float(row.actual_revenue),
+            "predicted_revenue":  float(row.predicted_revenue),
+            "residual":           float(row.residual) if row.residual is not None else None,
+        }
+        for row in rows
+    ]
+
+
+# ── Organic signals ────────────────────────────────────────────────────────────
+
+def get_organic_signals(db: Session) -> list:
+    """
+    Returns weekly organic signal data (competitor sales, newsletter, events).
+    Table used: organic_signals
+    """
+    rows = db.execute(text("""
+        SELECT week_start, competitor_sales, newsletter_subs,
+               facebook_impressions, search_clicks, event_flag
+        FROM   organic_signals
+        ORDER  BY week_start
+    """)).fetchall()
+
+    return [
+        {
+            "week_start":           str(row.week_start),
+            "competitor_sales":     float(row.competitor_sales)     if row.competitor_sales     is not None else None,
+            "newsletter_subs":      float(row.newsletter_subs)      if row.newsletter_subs      is not None else None,
+            "facebook_impressions": float(row.facebook_impressions) if row.facebook_impressions is not None else None,
+            "search_clicks":        float(row.search_clicks)        if row.search_clicks        is not None else None,
+            "event_flag":           row.event_flag,
+        }
+        for row in rows
+    ]
+
+
+# ── Pipeline run log ───────────────────────────────────────────────────────────
+
+def get_pipeline_runs(db: Session) -> list:
+    """
+    Returns all pipeline run log entries ordered by most recent first.
+    Table used: pipeline_run_log
+    """
+    rows = db.execute(text("""
+        SELECT id, flow_name, started_at, finished_at, status,
+               spend_rows, revenue_rows, model_run_id, error_msg
+        FROM   pipeline_run_log
+        ORDER  BY started_at DESC
+        LIMIT  50
+    """)).fetchall()
+
+    return [
+        {
+            "id":           row.id,
+            "flow_name":    row.flow_name,
+            "started_at":   str(row.started_at),
+            "finished_at":  str(row.finished_at) if row.finished_at else None,
+            "status":       row.status,
+            "spend_rows":   row.spend_rows,
+            "revenue_rows": row.revenue_rows,
+            "model_run_id": row.model_run_id,
+            "error_msg":    row.error_msg,
+        }
+        for row in rows
+    ]
+
+
+# ── Weekly channel contribution (for ChannelDeepDive real data) ───────────────
+
+def get_weekly_channel_data(db: Session) -> dict:
+    """
+    Returns weekly spend and predicted contribution per channel.
+    Used by the Channel Deep Dive page for real time-series charts.
+    Reads from: raw_spend_data, processed_features, channel_coefficients, model_runs
+    """
+    # Get latest model run coefficients
+    run_row = db.execute(text("""
+        SELECT id FROM model_runs WHERE status = 'complete'
+        ORDER BY run_at DESC LIMIT 1
+    """)).fetchone()
+
+    if run_row is None:
+        return {"channels": {}, "weeks": []}
+
+    # Get coefficients
+    coeff_rows = db.execute(text("""
+        SELECT channel, coefficient, roi_estimate
+        FROM   channel_coefficients
+        WHERE  model_run_id = :run_id
+    """), {"run_id": run_row.id}).fetchall()
+
+    coeffs = {row.channel: float(row.coefficient or 0) for row in coeff_rows}
+
+    # Get processed features (saturated values) per week per channel
+    feature_rows = db.execute(text("""
+        SELECT pf.week_start, pf.channel, pf.adstock_value,
+               pf.saturated_value, rs.spend_usd
+        FROM   processed_features pf
+        JOIN   raw_spend_data rs
+               ON pf.week_start = rs.week_start AND pf.channel = rs.channel
+        ORDER  BY pf.week_start, pf.channel
+    """)).fetchall()
+
+    if not feature_rows:
+        return {"channels": {}, "weeks": []}
+
+    # Build per-channel weekly series
+    channel_data = {}
+    weeks_set    = set()
+
+    for row in feature_rows:
+        ch    = row.channel
+        week  = str(row.week_start)
+        coef  = coeffs.get(ch, 0)
+        contrib = float(row.saturated_value or 0) * coef
+
+        if ch not in channel_data:
+            channel_data[ch] = {}
+        channel_data[ch][week] = {
+            "spend":        float(row.spend_usd or 0),
+            "adstock":      float(row.adstock_value or 0),
+            "saturated":    float(row.saturated_value or 0),
+            "contribution": round(contrib, 2),
+        }
+        weeks_set.add(week)
+
+    weeks = sorted(weeks_set)
+    return {"channels": channel_data, "weeks": weeks}

@@ -25,13 +25,15 @@ Swagger UI: **http://localhost:8000/docs**
 | GET | `/channel-weekly` | Weekly spend per channel (all channels) |
 | GET | `/model-types` | Available model types (OLS, Bayesian) and their status |
 
+```text
 ## File structure
-back/
-├── main.py      — FastAPI app, all endpoint definitions
-├── crud.py      — All SQL queries (no SQL in main.py)
-├── database.py  — Lazy SQLAlchemy engine, get_db() dependency
-├── schemas.py   — Pydantic request + response models
-└── requirements.txt
+back/  
+├── main.py      — FastAPI app, all endpoint definitions  
+├── crud.py      — All SQL queries (no SQL in main.py)  
+├── database.py  — Lazy SQLAlchemy engine, get_db() dependency  
+├── schemas.py   — Pydantic request + response models  
+└── requirements.txt  
+```
 
 ## How DB connection works
 

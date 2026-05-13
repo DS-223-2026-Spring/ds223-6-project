@@ -11,6 +11,7 @@ Validates infrastructure only. Runs in seconds. Use during development.
 check_source_files → check_db_connection → validate_data
 
 ### `mmm-pipeline-full` (end-to-end)
+```text
 Full pipeline from CSV to trained model. Logs results to `pipeline_run_log`.
 check_source_files
 ↓
@@ -23,6 +24,7 @@ validate_data        ← asserts row counts, channels, data quality
 run_model_task       ← calls ds/models/baseline.py via subprocess
 ↓
 log to pipeline_run_log
+```
 
 ## How to run
 

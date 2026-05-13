@@ -44,39 +44,43 @@ uvicorn trigger:app --host 0.0.0.0 --port 5000
 The `back` container calls these endpoints instead of running subprocesses directly.
 
 ## OLS modeling pipeline
-raw_spend_data + revenue_data + organic_signals
-│
-▼
-apply_adstock(decay λ per channel)
-│
-▼
-apply_hill(saturation K, n=2.0)
-│
-▼
-build_features() — joins organic controls + seasonality
-│
-▼
-OLS regression (80/20 time-series split)
-│
-├── write processed_features → DB
-├── write model_runs → DB
-└── write channel_coefficients → DB
+```text
+raw_spend_data + revenue_data + organic_signals  
+│  
+▼  
+apply_adstock(decay λ per channel)  
+│  
+▼  
+apply_hill(saturation K, n=2.0)  
+│  
+▼  
+build_features() — joins organic controls + seasonality  
+│  
+▼  
+OLS regression (80/20 time-series split)  
+│  
+├── write processed_features → DB  
+├── write model_runs → DB  
+└── write channel_coefficients → DB  
+```
 
 ## Bayesian modeling pipeline
 
+```text
 Extends the OLS baseline with a full PyMC specification. The key advantage is
 posterior distributions per channel ROI, enabling credible intervals
-(e.g. "$18.32 ± $4.10 at 90% CI") rather than single point estimates.
-Same features as OLS baseline
-│
-▼
-PyMC model (Normal likelihood, HalfNormal priors on channel betas)
-│
-▼
-NUTS sampler (default 500 draws)
-│
-├── write model_runs (version: v3.0-bayesian) → DB
-└── write channel_coefficients with roi_lower_90, roi_upper_90 → DB
+(e.g. "$18.32 ± $4.10 at 90% CI") rather than single point estimates.  
+Same features as OLS baseline  
+│  
+▼  
+PyMC model (Normal likelihood, HalfNormal priors on channel betas)  
+│  
+▼  
+NUTS sampler (default 500 draws)  
+│  
+├── write model_runs (version: v3.0-bayesian) → DB  
+└── write channel_coefficients with roi_lower_90, roi_upper_90 → DB  
+```
 
 ## Adstock decay rates (λ)
 

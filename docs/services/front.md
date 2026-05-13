@@ -13,10 +13,11 @@ Dashboard: **http://localhost:3000**
 | Budget Optimizer | Optimizer tab | `POST /optimize`, `GET/POST/PUT/DELETE /scenarios` |
 | Model Settings | Model tab | `GET /model-runs`, `GET /model-types`, `POST /retrain`, `POST /retrain-bayesian` |
 
-## File structure
-front/src/
-├── App.js                       — Sidebar nav, health badge, page routing
-├── index.js                     — React entry point
+## File structure  
+```text
+front/src/  
+├── App.js                       — Sidebar nav, health badge, page routing  
+├── index.js                     — React entry point  
 ├── components/
 │   ├── ApiService.js            — All API calls (centralised)
 │   ├── MetricCard.js            — Reusable KPI card
@@ -26,7 +27,7 @@ front/src/
 ├── ChannelDeepDive.js       — Saturation curve, adstock decay chart
 ├── BudgetOptimizer.js       — Budget sliders, live optimizer, scenario table
 └── ModelSettings.js         — Run history table, retrain buttons (OLS + Bayesian), pipeline info
-
+```
 ## Libraries used
 
 | Library | Version | Purpose |

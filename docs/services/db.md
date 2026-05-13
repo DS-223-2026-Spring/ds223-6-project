@@ -55,12 +55,15 @@ from db_helpers import (
 )
 ```
 
+```text
 ## ERD (text)
-raw_spend_data ──────────┐
-revenue_data             ├── DS pipeline ──> processed_features
-organic_signals ─────────┘                  model_runs ──> channel_coefficients
-model_runs ──> budget_scenarios
-pipeline_run_log
+raw_spend_data ──────────┐  
+revenue_data             ├── DS pipeline ──> processed_features  
+organic_signals ─────────┘  
+model_runs ──> channel_coefficients  
+model_runs ──> budget_scenarios  
+pipeline_run_log  
+```
 
 ## Assumptions
 

@@ -72,3 +72,7 @@ pipeline_run_log
 - Schema is created automatically on first `docker-compose up` via init scripts.
 - Init scripts run in alphabetical order: `01_schema.sql` → `02_add_organic_signals.sql` → `03_add_predictions.sql`.
 - `channel_coefficients` has optional columns `roi_lower_90` and `roi_upper_90` (added for Bayesian model runs); the backend checks for their existence before querying.
+
+## API Reference
+::: db.db_helpers
+::: db.load_data

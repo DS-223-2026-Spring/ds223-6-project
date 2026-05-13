@@ -113,3 +113,10 @@ NUTS sampler (default 500 draws)
 - Bayesian R²: comparable to OLS; key benefit is uncertainty quantification
 - Naive baseline R²: ~0.20 (predict mean revenue)
 - Key improvement driver: including `competitor_sales_B` as a control variable
+
+
+## API Reference
+::: ds.trigger
+::: ds.db_client
+::: ds.models.baseline
+::: ds.models.bayesian

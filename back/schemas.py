@@ -17,6 +17,9 @@ class ChannelResult(BaseModel):
     contribution_pct: Optional[float] = Field(None, description="% of total attributed revenue")
     coefficient:      Optional[float] = Field(None, description="Raw OLS regression coefficient")
     recommendation:   Optional[str]   = Field(None, description="under-invested | over-invested | optimal")
+    roi_lower_90:     Optional[float] = Field(None, description="90% credible interval lower bound (Bayesian only)")
+    roi_upper_90:     Optional[float] = Field(None, description="90% credible interval upper bound (Bayesian only)")
+    predicted_revenue_contribution: Optional[float] = Field(None, description="Estimated revenue in USD")
 
 class ModelResult(BaseModel):
     model_version: Optional[str]
@@ -108,3 +111,73 @@ class RetainResponse(BaseModel):
     message: str
     run_id:  Optional[int] = None
     status:  str
+
+
+# ── Predictions ───────────────────────────────────────────────────────────────
+
+class PredictionPoint(BaseModel):
+    week_start:         str
+    actual_revenue:     float
+    predicted_revenue:  float
+    residual:           Optional[float] = None
+
+class PredictionsResponse(BaseModel):
+    model_run_id: Optional[int] = None
+    points:       List[PredictionPoint]
+
+
+# ── Organic signals ────────────────────────────────────────────────────────────
+
+class OrganicSignalPoint(BaseModel):
+    week_start:           str
+    competitor_sales:     Optional[float] = None
+    newsletter_subs:      Optional[float] = None
+    facebook_impressions: Optional[float] = None
+    search_clicks:        Optional[float] = None
+    event_flag:           Optional[str]   = None
+
+class OrganicSignalsResponse(BaseModel):
+    points: List[OrganicSignalPoint]
+
+
+# ── Pipeline run log ───────────────────────────────────────────────────────────
+
+class PipelineRunRecord(BaseModel):
+    id:           int
+    flow_name:    str
+    started_at:   str
+    finished_at:  Optional[str]  = None
+    status:       str
+    spend_rows:   Optional[int]  = None
+    revenue_rows: Optional[int]  = None
+    model_run_id: Optional[int]  = None
+    error_msg:    Optional[str]  = None
+
+class PipelineRunsResponse(BaseModel):
+    runs: List[PipelineRunRecord]
+
+
+# ── Weekly channel data ───────────────────────────────────────────────────────
+
+class WeeklyChannelPoint(BaseModel):
+    week:         str
+    spend:        float
+    adstock:      float
+    saturated:    float
+    contribution: float
+
+class WeeklyChannelResponse(BaseModel):
+    channel: str
+    points:  List[WeeklyChannelPoint]
+
+class WeeklyAllChannelsResponse(BaseModel):
+    channels: dict
+    weeks:    List[str]
+
+
+# ── Model type selector ───────────────────────────────────────────────────────
+
+class ModelTypeResponse(BaseModel):
+    available: List[str]
+    current:   Optional[str] = None
+    note:      str

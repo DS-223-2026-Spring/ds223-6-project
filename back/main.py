@@ -12,8 +12,14 @@ All endpoints use:
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 import scipy.optimize as opt
 import numpy as np
+
+from pydantic import BaseModel
+
+class BayesianRetrainRequest(BaseModel):
+    draws: int = 500
 
 from database import get_db, check_connection
 import crud
@@ -25,6 +31,11 @@ from schemas import (
     ScenarioRecord, ScenariosResponse, ScenarioSaveResponse,
     DataSummaryResponse,
     RetainResponse,
+    PredictionsResponse, PredictionPoint,
+    OrganicSignalsResponse,
+    PipelineRunsResponse,
+    WeeklyAllChannelsResponse,
+    ModelTypeResponse,
 )
 
 app = FastAPI(
@@ -101,14 +112,21 @@ def get_results(db: Session = Depends(get_db)):
     tags=["Model"],
     summary="Full model training history",
 )
-def get_model_runs(db: Session = Depends(get_db)):
+def get_model_runs(
+    limit:  int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+):
     """
-    Returns all model runs ordered by most recent first.
+    Returns model runs ordered by most recent first.
+
+    - `limit`: number of runs to return (default 50)
+    - `offset`: pagination offset (default 0)
 
     Each run includes the **R² score**, model version, and status.
     Use this to compare model iterations over time.
     """
-    return {"runs": crud.get_model_runs(db)}
+    return {"runs": crud.get_model_runs(db, limit=limit, offset=offset)}
 
 
 @app.post(
@@ -254,14 +272,22 @@ def run_optimizer(req: OptimizeRequest, db: Session = Depends(get_db)):
     tags=["Scenarios"],
     summary="List all saved budget scenarios",
 )
-def get_scenarios(db: Session = Depends(get_db)):
+def get_scenarios(
+    limit:  int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+):
     """
-    Returns all saved budget scenarios ordered by most recently created first.
+    Returns saved budget scenarios ordered by most recently created first.
+
+    - `limit`: number of scenarios to return (default 50, max 200)
+    - `offset`: pagination offset (default 0)
 
     Use the **scenario comparison** view in the dashboard to compare up to
     three scenarios side by side.
     """
-    return {"scenarios": crud.get_all_scenarios(db)}
+    limit = min(limit, 200)
+    return {"scenarios": crud.get_all_scenarios(db, limit=limit, offset=offset)}
 
 
 @app.post(
@@ -346,3 +372,196 @@ def get_data_summary(db: Session = Depends(get_db)):
     If all spend values are 0, run `load_data.py` in the DB container first.
     """
     return crud.get_spend_summary(db)
+
+
+# ── Predictions (actual vs predicted) ────────────────────────────────────────
+
+@app.get(
+    "/predictions",
+    response_model=PredictionsResponse,
+    tags=["Analytics"],
+    summary="Weekly actual vs predicted revenue for the latest model run",
+)
+def get_predictions(
+    model_run_id: int = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Returns weekly actual vs predicted revenue for visualisation.
+
+    Use this to render the **actual vs predicted time-series chart** in the
+    Overview dashboard. Each point contains the week, actual revenue, model
+    prediction, and residual (actual − predicted).
+
+    - `model_run_id` (optional): specify a run ID to compare model versions.
+      Defaults to the latest completed run.
+
+    Returns an empty `points` list if the model has not been trained yet or
+    if predictions were not persisted (run `baseline.py` to populate).
+    """
+    points = crud.get_predictions(db, model_run_id)
+    # Resolve the actual run_id used (crud resolves None to latest)
+    if model_run_id is None and points:
+        # crude resolution: not needed for display, but keep consistent
+        pass
+    return PredictionsResponse(
+        model_run_id=model_run_id,
+        points=points,
+    )
+
+
+# ── Organic signals ───────────────────────────────────────────────────────────
+
+@app.get(
+    "/organic-signals",
+    response_model=OrganicSignalsResponse,
+    tags=["Analytics"],
+    summary="Weekly organic and external signals",
+)
+def get_organic_signals(db: Session = Depends(get_db)):
+    """
+    Returns weekly organic signal data used as model control variables:
+
+    - **competitor_sales**: competitor revenue (strong confound, r=+0.92 with revenue)
+    - **newsletter_subs**: newsletter subscriber count (organic demand driver)
+    - **facebook_impressions**: total Facebook impression volume
+    - **search_clicks**: total paid search click volume
+    - **event_flag**: `na` | `event1` | `event2` — special event weeks
+
+    Use this to render the **organic signals chart** alongside paid channel data,
+    helping users understand what drives revenue beyond advertising spend.
+    """
+    return OrganicSignalsResponse(points=crud.get_organic_signals(db))
+
+
+# ── Pipeline run log ──────────────────────────────────────────────────────────
+
+@app.get(
+    "/pipeline-runs",
+    response_model=PipelineRunsResponse,
+    tags=["Orchestration"],
+    summary="Prefect pipeline run history",
+)
+def get_pipeline_runs(db: Session = Depends(get_db)):
+    """
+    Returns the Prefect pipeline run log — every automated or manual run
+    of `mmm-pipeline-full` or `mmm-pipeline-test`.
+
+    Each entry includes:
+    - **status**: `running` | `success` | `failed`
+    - **spend_rows** / **revenue_rows**: data loaded in that run
+    - **model_run_id**: links to the model trained in that run
+    - **error_msg**: populated if the run failed
+
+    Use this in the Model Settings page to show the full operational history,
+    not just model training runs.
+    """
+    return PipelineRunsResponse(runs=crud.get_pipeline_runs(db))
+
+
+# ── Weekly channel data ───────────────────────────────────────────────────────
+
+@app.get(
+    "/channel-weekly",
+    response_model=WeeklyAllChannelsResponse,
+    tags=["Analytics"],
+    summary="Weekly spend, adstock, saturation and contribution per channel",
+)
+def get_channel_weekly(db: Session = Depends(get_db)):
+    """
+    Returns weekly time-series data for all channels, including:
+
+    - **spend**: raw weekly spend in USD
+    - **adstock**: spend after carryover decay transform
+    - **saturated**: adstock after Hill function saturation (0-1 scale)
+    - **contribution**: estimated revenue contribution (saturated × coefficient)
+
+    Used by the **Channel Deep Dive** page to render real data charts instead
+    of simulated curves. Requires the model to have been trained first.
+    """
+    return crud.get_weekly_channel_data(db)
+
+
+# ── Model type selector ───────────────────────────────────────────────────────
+
+@app.get(
+    "/model-types",
+    response_model=ModelTypeResponse,
+    tags=["Model"],
+    summary="Available model types and current active version",
+)
+def get_model_types(db: Session = Depends(get_db)):
+    """
+    Returns available model types and the currently active version.
+
+    - **ols**: Fast OLS regression (seconds). Good for iteration.
+    - **bayesian**: PyMC Bayesian model (2-5 minutes). Produces credible intervals.
+
+    The current model is determined by the latest completed run in `model_runs`.
+    Use `POST /retrain-bayesian` to train the Bayesian model.
+    """
+    latest = db.execute(text("""
+        SELECT model_version FROM model_runs
+        WHERE status = 'complete'
+        ORDER BY run_at DESC LIMIT 1
+    """)).fetchone()
+
+    current = latest.model_version if latest else None
+    model_type = "bayesian" if current and "bayesian" in current else "ols"
+
+    return ModelTypeResponse(
+        available=["ols", "bayesian"],
+        current=model_type,
+        note="Use POST /retrain for OLS (fast). Use POST /retrain-bayesian for Bayesian (2-5 min, produces credible intervals).",
+    )
+
+
+@app.post(
+    "/retrain-bayesian",
+    response_model=RetainResponse,
+    tags=["Model"],
+    summary="Trigger Bayesian model retraining (PyMC)",
+)
+def trigger_retrain_bayesian(payload: BayesianRetrainRequest, background_tasks: BackgroundTasks):
+    """
+    Triggers the Bayesian MMM model (PyMC) inside the DS container.
+
+    **Differences from OLS (`POST /retrain`):**
+    - Takes 2–5 minutes instead of ~30 seconds
+    - Produces 90% credible intervals for each channel's ROI
+    - `roi_lower_90` and `roi_upper_90` fields are populated in results
+    - Model version will be `v3.0-bayesian`
+
+    The retrain runs asynchronously. Poll `GET /model-runs` to check completion.
+    """
+    import urllib.request
+    import urllib.error
+    import json as _json
+
+    print("🚀 BAYESIAN DRAW REQUEST:", payload.draws)
+
+    def run_bayesian():
+        try:
+            payload_json = _json.dumps({"draws": payload.draws}).encode()
+
+            req = urllib.request.Request(
+                "http://ds:5000/run-bayesian",
+                method="POST",
+                headers={"Content-Type": "application/json"},
+                data=payload_json,
+            )
+            with urllib.request.urlopen(req, timeout=600) as resp:
+                result = _json.loads(resp.read().decode())
+                status = result.get("status", "unknown")
+                print(f"[retrain-bayesian] {status}")
+                if result.get("error"):
+                    print(f"[retrain-bayesian] Error: {result['error']}")
+        except Exception as e:
+            print(f"[retrain-bayesian] Failed: {e}")
+            print("[retrain-bayesian] Fallback: docker exec mmm_ds python models/bayesian.py")
+
+    background_tasks.add_task(run_bayesian)
+    return RetainResponse(
+        message=f"Bayesian retrain started with {payload.draws} draws. Poll GET /model-runs for completion.",
+        status="started",
+    )

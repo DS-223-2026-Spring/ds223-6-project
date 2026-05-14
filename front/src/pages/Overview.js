@@ -140,7 +140,7 @@ export default function Overview() {
                   }}
                   contentStyle={{ fontSize:12, borderRadius:6 }} />
                 <ReferenceLine x={1} stroke="#888" strokeDasharray="4 2"
-                  label={{ value:"Break-even", position:"insideTopRight", fontSize:10 }} />
+                  label={{ value: "Break-even", position: "top", fontSize: 10, fill: "#888"}} />
                 <Bar dataKey="roi" radius={[0,4,4,0]}>
                   {roiData.map(e => <Cell key={e.channel} fill={COLORS[e.channel]||"#888"} />)}
                   {hasBayesianCI && (
